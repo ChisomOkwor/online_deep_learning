@@ -9,32 +9,32 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class MLPPlanner(nn.Module):
-    def __init__(
-        self,
-        n_track: int = 10,
-        n_waypoints: int = 3,
-    ):
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 128):
         """
         Args:
             n_track (int): number of points in each side of the track
             n_waypoints (int): number of waypoints to predict
+            hidden_dim (int): size of the hidden layers
         """
         super().__init__()
 
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
-    def forward(
-        self,
-        track_left: torch.Tensor,
-        track_right: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
+        input_dim = 2 * n_track * 2  # track_left + track_right, each with 2D points
+        output_dim = n_waypoints * 2  # n_waypoints, each with 2D coordinates
+
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+    def forward(self, track_left: torch.Tensor, track_right: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Predicts waypoints from the left and right boundaries of the track.
-
-        During test time, your model will be called with
-        model(track_left=..., track_right=...), so keep the function signature as is.
 
         Args:
             track_left (torch.Tensor): shape (b, n_track, 2)
@@ -43,7 +43,20 @@ class MLPPlanner(nn.Module):
         Returns:
             torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
         """
-        raise NotImplementedError
+        # Concatenate left and right tracks
+        batch_size = track_left.shape[0]
+        x = torch.cat([track_left, track_right], dim=1)  # Shape: (b, 2 * n_track, 2)
+
+        # Flatten the input
+        x = x.view(batch_size, -1)  # Shape: (b, 2 * n_track * 2)
+
+        # Pass through MLP
+        x = self.mlp(x)  # Shape: (b, n_waypoints * 2)
+
+        # Reshape to (b, n_waypoints, 2)
+        x = x.view(batch_size, self.n_waypoints, 2)
+
+        return x
 
 
 class TransformerPlanner(nn.Module):
@@ -52,13 +65,43 @@ class TransformerPlanner(nn.Module):
         n_track: int = 10,
         n_waypoints: int = 3,
         d_model: int = 64,
+        num_layers: int = 2,
+        num_heads: int = 4,
+        dropout: float = 0.1,
     ):
+        """
+        Args:
+            n_track (int): Number of points in each side of the track
+            n_waypoints (int): Number of waypoints to predict
+            d_model (int): Dimension of the transformer model
+            num_layers (int): Number of layers in the Transformer decoder
+            num_heads (int): Number of attention heads
+            dropout (float): Dropout rate
+        """
         super().__init__()
 
         self.n_track = n_track
         self.n_waypoints = n_waypoints
+        self.d_model = d_model
 
+        # Input encoding layer: projects (x, y) coordinates to d_model
+        self.input_encoder = nn.Linear(2, d_model)
+
+        # Learned query embeddings for waypoints
         self.query_embed = nn.Embedding(n_waypoints, d_model)
+
+        # TransformerDecoder
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=d_model,
+            nhead=num_heads,
+            dim_feedforward=4 * d_model,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+
+        # Output projection layer: projects d_model back to (x, y) coordinates
+        self.output_proj = nn.Linear(d_model, 2)
 
     def forward(
         self,
@@ -69,43 +112,100 @@ class TransformerPlanner(nn.Module):
         """
         Predicts waypoints from the left and right boundaries of the track.
 
-        During test time, your model will be called with
-        model(track_left=..., track_right=...), so keep the function signature as is.
-
         Args:
-            track_left (torch.Tensor): shape (b, n_track, 2)
-            track_right (torch.Tensor): shape (b, n_track, 2)
+            track_left (torch.Tensor): shape (B, n_track, 2)
+            track_right (torch.Tensor): shape (B, n_track, 2)
 
         Returns:
-            torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
+            torch.Tensor: Predicted waypoints with shape (B, n_waypoints, 2)
         """
-        raise NotImplementedError
+        # Concatenate left and right track boundaries
+        x = torch.cat([track_left, track_right], dim=1)  # Shape: (B, 2 * n_track, 2)
+
+        # Encode input features
+        x = self.input_encoder(x)  # Shape: (B, 2 * n_track, d_model)
+
+        # Get waypoint queries
+        query = self.query_embed.weight.unsqueeze(0).repeat(x.size(0), 1, 1)  # Shape: (B, n_waypoints, d_model)
+
+        # Pass through TransformerDecoder
+        out = self.decoder(query, x)  # Shape: (B, n_waypoints, d_model)
+
+        # Project output embeddings to (x, y) coordinates
+        waypoints = self.output_proj(out)  # Shape: (B, n_waypoints, 2)
+
+        return waypoints
 
 
-class CNNPlanner(torch.nn.Module):
+
+class CNNPlanner(nn.Module):
     def __init__(
         self,
         n_waypoints: int = 3,
+        hidden_dim: int = 128,
     ):
+        """
+        Args:
+            n_waypoints (int): Number of waypoints to predict
+            hidden_dim (int): Size of the hidden layer in the fully connected network
+        """
         super().__init__()
 
         self.n_waypoints = n_waypoints
 
+        # Input normalization
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN), persistent=False)
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
 
+        # CNN Backbone
+        self.cnn = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # Output: (32, 48, 64)
+
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # Output: (64, 24, 32)
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # Output: (128, 12, 16)
+        )
+
+        # Fully connected layers
+        self.fc = nn.Sequential(
+            nn.Linear(128 * 12 * 16, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, n_waypoints * 2),  # Predict (x, y) for each waypoint
+        )
+
     def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
         """
+        Predicts waypoints from the input image.
+
         Args:
-            image (torch.FloatTensor): shape (b, 3, h, w) and vals in [0, 1]
+            image (torch.FloatTensor): shape (B, 3, 96, 128) with values in [0, 1]
 
         Returns:
-            torch.FloatTensor: future waypoints with shape (b, n, 2)
+            torch.FloatTensor: Predicted waypoints with shape (B, n_waypoints, 2)
         """
-        x = image
-        x = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
+        # Normalize input
+        x = (image - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
-        raise NotImplementedError
+        # Extract features using CNN
+        x = self.cnn(x)  # Shape: (B, 128, 12, 16)
+
+        # Flatten features
+        x = x.view(x.size(0), -1)  # Shape: (B, 128 * 12 * 16)
+
+        # Predict waypoints
+        x = self.fc(x)  # Shape: (B, n_waypoints * 2)
+
+        # Reshape to (B, n_waypoints, 2)
+        waypoints = x.view(x.size(0), self.n_waypoints, 2)
+
+        return waypoints
+
 
 
 MODEL_FACTORY = {
