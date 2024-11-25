@@ -40,7 +40,8 @@ def train(
 
     # Load model
     print(f"Loading model: {model_name}")
-    model = load_model(model_name).to(device)
+    # model = load_model(model_name).to(device)
+    model = load_model(model_name)
 
     # Define optimizer and loss function
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -58,16 +59,23 @@ def train(
             # Prepare inputs based on model type
             if model_name == "cnn_planner":
                 # CNNPlanner expects images as input
-                inputs = batch["image"].to(device)
+                # inputs = batch["image"].to(device)
+                inputs = batch["image"]
+
                 pred_waypoints = model(inputs)
             else:
                 # Other planners expect track boundaries as input
-                track_left = batch["track_left"].to(device)
-                track_right = batch["track_right"].to(device)
+                track_left = batch["track_left"]
+                track_right = batch["track_right"]
+
+                # track_left = batch["track_left"].to(device)
+                # track_right = batch["track_right"].to(device)
                 pred_waypoints = model(track_left=track_left, track_right=track_right)
 
             # Get ground truth waypoints
-            waypoints = batch["waypoints"].to(device)
+            # waypoints = batch["waypoints"].to(device)
+            waypoints = batch["waypoints"]
+
 
             # Compute loss
             loss = criterion(pred_waypoints, waypoints)
@@ -87,14 +95,19 @@ def train(
         with torch.no_grad():
             for batch in val_loader:
                 if model_name == "cnn_planner":
-                    inputs = batch["image"].to(device)
+                    # inputs = batch["image"].to(device)
+
+                    inputs = batch["image"]
                     pred_waypoints = model(inputs)
                 else:
-                    track_left = batch["track_left"].to(device)
-                    track_right = batch["track_right"].to(device)
+                    # track_left = batch["track_left"].to(device)
+                    # track_right = batch["track_right"].to(device)
+                    track_left = batch["track_left"]
+                    track_right = batch["track_right"]
                     pred_waypoints = model(track_left=track_left, track_right=track_right)
-
-                waypoints = batch["waypoints"].to(device)
+                
+                # waypoints = batch["waypoints"].to(device)
+                waypoints = batch["waypoints"]
                 loss = criterion(pred_waypoints, waypoints)
                 val_loss += loss.item()
 
