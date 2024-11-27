@@ -10,7 +10,7 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class MLPPlanner(nn.Module):
-    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 32, hidden_dim2: int = 64):
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 32, hidden_dim2: int = 16):
         super().__init__()
 
         self.n_track = n_track
@@ -22,10 +22,10 @@ class MLPPlanner(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim1),
             nn.LeakyReLU(),
-            nn.Dropout(0.3),  # Add dropout for regularization
+            nn.Dropout(0.1),  # Add dropout for regularization
             nn.Linear(hidden_dim1, hidden_dim2),
             nn.LeakyReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.1),
             nn.Linear(hidden_dim2, output_dim),
         )
 

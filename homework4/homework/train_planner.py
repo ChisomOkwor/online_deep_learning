@@ -10,6 +10,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tqdm import tqdm
 
+def weighted_loss(pred, target, mask, alpha=0.7):
+    lateral_error = torch.mean(torch.abs(pred[mask][:, 1] - target[mask][:, 1]))
+    longitudinal_error = torch.mean(torch.abs(pred[mask][:, 0] - target[mask][:, 0]))
+    return alpha * lateral_error + (1 - alpha) * longitudinal_error
+
+
 def train_model(
     model_name: str,
     transform_pipeline: str,
@@ -62,7 +68,7 @@ def train_model(
             )
 
             predictions = model(track_left, track_right)
-            loss = criterion(predictions[mask], waypoints[mask])
+            loss = weighted_loss(predictions[mask], waypoints[mask])
             loss.backward()
 
             clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -87,8 +93,9 @@ def train_model(
                 loss = criterion(predictions[mask], waypoints[mask])
                 val_loss += loss.item()
 
-                lateral_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
-                longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
+                lateral_error = torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
+                longitudinal_error = torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
+
 
         val_loss /= len(val_loader)
         lateral_error /= len(val_loader)
