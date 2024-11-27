@@ -10,7 +10,7 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class MLPPlanner(nn.Module):
-    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 32, hidden_dim2: int = 16):
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 64, hidden_dim2: int = 32):
         super().__init__()
 
         self.n_track = n_track
