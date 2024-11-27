@@ -195,16 +195,6 @@
 # #     train(args)
 
 
-import argparse
-import torch
-import torch.nn as nn
-from torch.optim import Adam
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-from homework.models import load_model, save_model
-from homework.datasets.road_dataset import load_data
-
-
 # Define the loss function
 def combined_loss(pred, target, weight=0.6):
     """
@@ -213,6 +203,14 @@ def combined_loss(pred, target, weight=0.6):
     lateral_error = torch.mean(torch.abs(pred[..., 0] - target[..., 0]))
     longitudinal_error = torch.mean((pred[..., 1] - target[..., 1]) ** 2)
     return weight * lateral_error + (1 - weight) * longitudinal_error
+
+
+# Try this as well
+def custom_loss(pred, target, mask, alpha=0.7, beta=0.3):
+    lateral_error = torch.mean(torch.abs(pred[mask][:, 0] - target[mask][:, 0]))
+    longitudinal_error = torch.mean(torch.abs(pred[mask][:, 1] - target[mask][:, 1]))
+    return alpha * lateral_error + beta * longitudinal_error
+
 
 
 # Debugging utilities
@@ -229,109 +227,83 @@ def debug_predictions(pred, target, epoch, mode="train"):
     return lateral_error, longitudinal_error
 
 
-# Define the MLP Planner training loop
-def train(
-    model_name: str,
-    transform_pipeline: str = "state_only",
-    num_workers: int = 4,
-    lr: float = 1e-3,
-    batch_size: int = 128,
-    num_epochs: int = 50,
-    debug=False,
-):
-    print(f"Training {model_name} with lr={lr}, batch_size={batch_size}, num_epochs={num_epochs}")
+import torch
+from torch import nn
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.nn.utils import clip_grad_norm_
 
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def train_model(model, train_loader, val_loader, num_epochs=50, lr=1e-3, grad_clip=5.0):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
 
-    # Load dataset
-    print("Loading dataset...")
-    train_loader = load_data(
-        dataset_path="drive_data/train",
-        transform_pipeline=transform_pipeline,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-    )
-    val_loader = load_data(
-        dataset_path="drive_data/val",
-        transform_pipeline=transform_pipeline,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-    )
-
-    # Load model
-    print(f"Loading model: {model_name}")
-    model = load_model(model_name).to(device)
-
-    # Define optimizer
+    # Use L1 Loss
+    criterion = nn.L1Loss()
     optimizer = Adam(model.parameters(), lr=lr)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
-    # Training loop
-    print("Starting training...")
+    best_lateral_error = float('inf')  # Keep track of the best lateral error
     for epoch in range(num_epochs):
-        # Training phase
         model.train()
-        train_loss = 0.0
-        for batch in tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{num_epochs}"):
+        train_loss = 0
+        for batch in train_loader:
+            track_left, track_right, waypoints, mask = (
+                batch["track_left"].to(device),
+                batch["track_right"].to(device),
+                batch["waypoints"].to(device),
+                batch["waypoints_mask"].to(device),
+            )
+
             optimizer.zero_grad()
-
-            # Prepare inputs
-            track_left = batch["track_left"].to(device)
-            track_right = batch["track_right"].to(device)
-            waypoints = batch["waypoints"].to(device)
-
-            # Model prediction
-            pred_waypoints = model(track_left=track_left, track_right=track_right)
-
-            # Compute loss
-            loss = combined_loss(pred_waypoints, waypoints)
-
-            # Backpropagation
+            predictions = model(track_left, track_right)
+            loss = criterion(predictions[mask], waypoints[mask])  # Apply mask
             loss.backward()
+            
+            # Gradient clipping
+            clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
-
             train_loss += loss.item()
 
         train_loss /= len(train_loader)
-        print(f"Epoch {epoch + 1}/{num_epochs} - Training Loss: {train_loss:.4f}")
 
-        # Validation phase
+        # Validation
         model.eval()
-        val_loss = 0.0
-        val_lateral_error = 0.0
-        val_longitudinal_error = 0.0
+        val_loss, lateral_error, longitudinal_error = 0, 0, 0
         with torch.no_grad():
             for batch in val_loader:
-                track_left = batch["track_left"].to(device)
-                track_right = batch["track_right"].to(device)
-                waypoints = batch["waypoints"].to(device)
+                track_left, track_right, waypoints, mask = (
+                    batch["track_left"].to(device),
+                    batch["track_right"].to(device),
+                    batch["waypoints"].to(device),
+                    batch["waypoints_mask"].to(device),
+                )
 
-                # Model prediction
-                pred_waypoints = model(track_left=track_left, track_right=track_right)
-
-                # Compute loss
-                loss = combined_loss(pred_waypoints, waypoints)
+                predictions = model(track_left, track_right)
+                loss = criterion(predictions[mask], waypoints[mask])
                 val_loss += loss.item()
-
-                # Debug lateral and longitudinal error
-                lat_err, long_err = debug_predictions(pred_waypoints, waypoints, epoch + 1, mode="validation")
-                val_lateral_error += lat_err
-                val_longitudinal_error += long_err
+                
+                lateral_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
+                longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
 
         val_loss /= len(val_loader)
-        val_lateral_error /= len(val_loader)
-        val_longitudinal_error /= len(val_loader)
+        lateral_error /= len(val_loader)
+        longitudinal_error /= len(val_loader)
 
-        print(
-            f"Epoch {epoch + 1}/{num_epochs} - Validation Loss: {val_loss:.4f}, "
-            f"Lateral Error: {val_lateral_error:.4f}, Longitudinal Error: {val_longitudinal_error:.4f}"
-        )
+        print(f"Epoch {epoch + 1}/{num_epochs} - "
+              f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, "
+              f"Lateral Error: {lateral_error:.4f}, Longitudinal Error: {longitudinal_error:.4f}")
 
-    # Save model
-    save_model(model)
-    print(f"Model {model_name} saved successfully!")
+        # Save the model with the best lateral error
+        if lateral_error < best_lateral_error:
+            best_lateral_error = lateral_error
+            torch.save(model.state_dict(), "best_model.pt")
+            print(f"New best model saved with lateral error: {best_lateral_error:.4f}")
+
+        # Adjust learning rate
+        scheduler.step(val_loss)
+
+    print("Training complete. Best lateral error:", best_lateral_error)
+
 
 
 # Main entry point
@@ -345,13 +317,19 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="Enable debug mode for detailed outputs")
     args = parser.parse_args()
 
-    train(
-        model_name=args.model,
-        transform_pipeline="state_only",
-        num_workers=args.num_workers,
-        lr=args.learning_rate,
-        batch_size=args.batch_size,
-        num_epochs=args.epochs,
-        debug=args.debug,
-    )
+    train(args)
+
+        
+        
+
+
+    # train(
+    #     model_name=args.model,
+    #     transform_pipeline="state_only",
+    #     num_workers=args.num_workers,
+    #     lr=args.learning_rate,
+    #     batch_size=args.batch_size,
+    #     num_epochs=args.epochs,
+    #     debug=args.debug,
+    # )
 

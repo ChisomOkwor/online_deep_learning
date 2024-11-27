@@ -89,7 +89,7 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class MLPPlanner(nn.Module):
-    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 128):
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 64):
         """
         Args:
             n_track (int): Number of points in each side of the track.
@@ -107,9 +107,9 @@ class MLPPlanner(nn.Module):
 
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Linear(hidden_dim, output_dim),
         )
 
@@ -151,6 +151,7 @@ class MLPPlanner(nn.Module):
         x = x.view(batch_size, self.n_waypoints, 2)
 
         return x
+
 
 
 class TransformerPlanner(nn.Module):
