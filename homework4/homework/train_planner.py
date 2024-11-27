@@ -20,6 +20,13 @@ def balanced_loss(pred, target):
     return 0.6 * lateral_error + 0.4 * longitudinal_error
 
 
+def log_lateral_and_longitudinal_error(pred, target):
+    lateral_error = torch.mean(torch.abs(pred[..., 0] - target[..., 0])).item()
+    longitudinal_error = torch.mean((pred[..., 1] - target[..., 1]) ** 2).item()
+    return lateral_error, longitudinal_error
+
+
+
 def train(
     model_name: str,
     transform_pipeline: str = "state_only",
@@ -89,8 +96,11 @@ def train(
         # Validation loop
         model.eval()
         val_loss = 0.0
+        val_lateral_error = 0.0
+        val_longitudinal_error = 0.0
+
         with torch.no_grad():
-            for batch in tqdm(val_loader, desc=f"Validating Epoch {epoch + 1}/{num_epoch}"):
+            for batch in val_loader:
                 track_left = batch["track_left"].to(device)
                 track_right = batch["track_right"].to(device)
                 waypoints = batch["waypoints"].to(device)
@@ -100,8 +110,20 @@ def train(
 
                 val_loss += loss.item()
 
+                # Log lateral and longitudinal errors
+                lat_err, long_err = log_lateral_and_longitudinal_error(pred_waypoints, waypoints)
+                val_lateral_error += lat_err
+                val_longitudinal_error += long_err
+
         val_loss /= len(val_loader)
-        print(f"Epoch {epoch + 1}/{num_epoch} - Validation Loss: {val_loss:.4f}")
+        val_lateral_error /= len(val_loader)
+        val_longitudinal_error /= len(val_loader)
+
+        print(
+            f"Epoch {epoch + 1}/{num_epoch} - Validation Loss: {val_loss:.4f}, "
+            f"Lateral Error: {val_lateral_error:.4f}, Longitudinal Error: {val_longitudinal_error:.4f}"
+        )
+
 
     # Save model
     save_model(model)
