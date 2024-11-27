@@ -291,6 +291,10 @@ def train_model(
         scheduler.step(val_loss)
 
     print("Training complete. Best lateral error:", best_lateral_error)
+  # Save model
+    save_model(model)
+    print(f"Model {model_name} saved successfully!")
+    
 
 
 if __name__ == "__main__":
