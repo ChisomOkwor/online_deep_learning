@@ -8,85 +8,6 @@ INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
-# class MLPPlanner(nn.Module):
-#     def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 128):
-#         """
-#         Args:
-#             n_track (int): number of points in each side of the track
-#             n_waypoints (int): number of waypoints to predict
-#             hidden_dim (int): size of the hidden layers
-#         """
-#         super().__init__()
-
-#         self.n_track = n_track
-#         self.n_waypoints = n_waypoints
-
-#         input_dim = 2 * n_track * 2  # track_left + track_right, each with 2D points
-#         output_dim = n_waypoints * 2  # n_waypoints, each with 2D coordinates
-
-#         self.mlp = nn.Sequential(
-#             nn.Linear(input_dim, hidden_dim),
-#             nn.ReLU(),
-#             nn.Linear(hidden_dim, hidden_dim),
-#             nn.ReLU(),
-#             nn.Linear(hidden_dim, output_dim),
-#         )
-    #
-    # def forward(self, track_left: torch.Tensor, track_right: torch.Tensor, **kwargs) -> torch.Tensor:
-    #     """
-    #     Predicts waypoints from the left and right boundaries of the track.
-    #
-    #     Args:
-    #         track_left (torch.Tensor): shape (b, n_track, 2)
-    #         track_right (torch.Tensor): shape (b, n_track, 2)
-    #
-    #     Returns:
-    #         torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
-    #     """
-    #     # Concatenate left and right tracks
-    #     batch_size = track_left.shape[0]
-    #     x = torch.cat([track_left, track_right], dim=1)  # Shape: (b, 2 * n_track, 2)
-    #
-    #     # Flatten the input
-    #     x = x.view(batch_size, -1)  # Shape: (b, 2 * n_track * 2)
-    #
-    #     # Pass through MLP
-    #     x = self.mlp(x)  # Shape: (b, n_waypoints * 2)
-    #
-    #     # Reshape to (b, n_waypoints, 2)
-    #     x = x.view(batch_size, self.n_waypoints, 2)
-    #
-    #     return x
-
-    # def forward(self, track_left: torch.Tensor, track_right: torch.Tensor, **kwargs) -> torch.Tensor:
-    #     """
-    #     Predicts waypoints from the left and right boundaries of the track.
-
-    #     Args:
-    #         track_left (torch.Tensor): shape (batch_size, n_track, 2)
-    #         track_right (torch.Tensor): shape (batch_size, n_track, 2)
-
-    #     Returns:
-    #         torch.Tensor: future waypoints with shape (batch_size, n_waypoints, 2)
-    #     """
-    #     # Calculate centerline and lane width
-    #     centerline = (track_left + track_right) / 2  # Average of left and right tracks
-    #     lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)  # Norm along the last dimension
-
-    #     # Expand lane_width to match (batch_size, n_track, 2)
-    #     lane_width = lane_width.repeat(1, 1, 2)  # Duplicate along the last dimension
-
-    #     # Concatenate features: track boundaries, centerline, lane width
-    #     batch_size = track_left.shape[0]
-    #     x = torch.cat([track_left, track_right, centerline, lane_width],
-    #                   dim=1)  # Concatenate along the second dimension
-    #     x = x.view(batch_size, -1)  # Flatten input
-
-    #     # Pass through MLP
-    #     x = self.mlp(x)  # Shape: (batch_size, n_waypoints * 2)
-    #     x = x.view(batch_size, self.n_waypoints, 2)  # Reshape to (batch_size, n_waypoints, 2)
-    #     return x
-
 
 class MLPPlanner(nn.Module):
     def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 64, hidden_dim2: int = 32):
@@ -101,10 +22,10 @@ class MLPPlanner(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim1),
             nn.LeakyReLU(),
-            nn.Dropout(0.1),  # Add dropout for regularization
+            nn.Dropout(0.2),  # Add dropout for regularization
             nn.Linear(hidden_dim1, hidden_dim2),
             nn.LeakyReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.2),
             nn.Linear(hidden_dim2, output_dim),
         )
 

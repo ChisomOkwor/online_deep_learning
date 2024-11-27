@@ -211,7 +211,7 @@ def train_model(
     debug: bool = False,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    writer = SummaryWriter(log_dir="logs")
+    writer = SummaryWriter(log_dir="runs/mlp_planner")
 
     # Load dataset
     train_loader = load_data(
@@ -235,7 +235,7 @@ def train_model(
 
     # Optimizer, scheduler, loss
     optimizer = Adam(model.parameters(), lr=lr, weight_decay=1e-5)
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
     criterion = nn.L1Loss()
 
     best_lateral_error = float("inf")
