@@ -28,10 +28,24 @@ def dynamic_balanced_loss(pred, target, epoch):
     return lateral_weight * lateral_error + longitudinal_weight * longitudinal_error
 
 
-def log_lateral_and_longitudinal_error(pred, target):
-    lateral_error = torch.mean(torch.abs(pred[..., 0] - target[..., 0])).item()
-    longitudinal_error = torch.mean((pred[..., 1] - target[..., 1]) ** 2).item()
-    return lateral_error, longitudinal_error
+def log_lateral_and_longitudinal_error(pred, target, mask):
+    """
+    Computes lateral and longitudinal errors with masking.
+    Args:
+        pred: Predicted waypoints (batch_size, n_waypoints, 2)
+        target: Ground truth waypoints (batch_size, n_waypoints, 2)
+        mask: Boolean mask for valid waypoints (batch_size, n_waypoints)
+    Returns:
+        Tuple of (lateral_error, longitudinal_error)
+    """
+    error = torch.abs(pred - target)
+    error_masked = error * mask[..., None]
+
+    lateral_error = error_masked[..., 1].sum() / mask.sum()
+    longitudinal_error = error_masked[..., 0].sum() / mask.sum()
+
+    return lateral_error.item(), longitudinal_error.item()
+
 
 
 
@@ -92,7 +106,7 @@ def train(
             pred_waypoints = model(track_left=track_left, track_right=track_right)
 
             # Compute loss
-            loss = dynamic_balanced_loss(pred_waypoints, waypoints, epoch)
+            loss = balanced_loss(pred_waypoints, waypoints, epoch)
 
 
             # Backpropagation and optimization
@@ -120,12 +134,15 @@ def train(
                 waypoints = batch["waypoints"].to(device)
 
                 pred_waypoints = model(track_left=track_left, track_right=track_right)
+                torch.save({"pred": pred_waypoints, "target": waypoints, "mask": batch["waypoints_mask"]}, "debug_data.pt")
+
                 loss = balanced_loss(pred_waypoints, waypoints)
 
                 val_loss += loss.item()
 
                 # Log lateral and longitudinal errors
-                lat_err, long_err = log_lateral_and_longitudinal_error(pred_waypoints, waypoints)
+                lat_err, long_err = log_lateral_and_longitudinal_error(
+                  pred_waypoints, waypoints, batch["waypoints_mask"].to(device))
                 val_lateral_error += lat_err
                 val_longitudinal_error += long_err
 
