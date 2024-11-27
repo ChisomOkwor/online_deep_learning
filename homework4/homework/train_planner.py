@@ -6,6 +6,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.utils import clip_grad_norm_
 from homework.models import load_model, save_model
 from homework.datasets.road_dataset import load_data
+from torch.utils.tensorboard import SummaryWriter
+
 from tqdm import tqdm
 
 
@@ -197,6 +199,8 @@ from tqdm import tqdm
 # #     args = parser.parse_args()
 
 # #     train(args)
+
+
 def train_model(
     model_name: str,
     transform_pipeline: str,
@@ -207,6 +211,7 @@ def train_model(
     debug: bool = False,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    writer = SummaryWriter(log_dir="logs")
 
     # Load dataset
     train_loader = load_data(
@@ -228,8 +233,8 @@ def train_model(
     print(f"Loading model: {model_name}")
     model = load_model(model_name).to(device)
 
-    # Define optimizer, scheduler, and loss
-    optimizer = Adam(model.parameters(), lr=lr)
+    # Optimizer, scheduler, loss
+    optimizer = Adam(model.parameters(), lr=lr, weight_decay=1e-5)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
     criterion = nn.L1Loss()
 
@@ -238,6 +243,8 @@ def train_model(
         model.train()
         train_loss = 0
         for batch in train_loader:
+            optimizer.zero_grad()
+
             track_left, track_right, waypoints, mask = (
                 batch["track_left"].to(device),
                 batch["track_right"].to(device),
@@ -245,7 +252,6 @@ def train_model(
                 batch["waypoints_mask"].to(device),
             )
 
-            optimizer.zero_grad()
             predictions = model(track_left, track_right)
             loss = criterion(predictions[mask], waypoints[mask])
             loss.backward()
@@ -272,17 +278,22 @@ def train_model(
                 loss = criterion(predictions[mask], waypoints[mask])
                 val_loss += loss.item()
 
-                lateral_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
-                longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
+                lateral_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
+                longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
 
         val_loss /= len(val_loader)
         lateral_error /= len(val_loader)
         longitudinal_error /= len(val_loader)
 
+        # Log metrics
+        writer.add_scalar("Loss/Train", train_loss, epoch)
+        writer.add_scalar("Loss/Validation", val_loss, epoch)
+        writer.add_scalar("Error/Lateral", lateral_error, epoch)
+        writer.add_scalar("Error/Longitudinal", longitudinal_error, epoch)
+
         print(f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.4f}, "
               f"Val Loss: {val_loss:.4f}, Lateral Error: {lateral_error:.4f}, Longitudinal Error: {longitudinal_error:.4f}")
 
-        # Save best model
         if lateral_error < best_lateral_error:
             best_lateral_error = lateral_error
             torch.save(model.state_dict(), "best_model.pt")
@@ -290,8 +301,8 @@ def train_model(
 
         scheduler.step(val_loss)
 
+    writer.close()
     print("Training complete. Best lateral error:", best_lateral_error)
-  # Save model
     save_model(model)
     print(f"Model {model_name} saved successfully!")
     
