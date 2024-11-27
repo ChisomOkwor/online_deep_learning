@@ -193,56 +193,43 @@
 # #     args = parser.parse_args()
 
 # #     train(args)
-import torch
-from torch import nn
-from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.nn.utils import clip_grad_norm_
+def train_model(
+    model_name: str,
+    transform_pipeline: str,
+    num_workers: int,
+    lr: float,
+    batch_size: int,
+    num_epochs: int,
+    debug: bool = False,
+):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Define the loss function
-def combined_loss(pred, target, weight=0.6):
-    """
-    Weighted combination of lateral and longitudinal errors.
-    """
-    lateral_error = torch.mean(torch.abs(pred[..., 0] - target[..., 0]))
-    longitudinal_error = torch.mean((pred[..., 1] - target[..., 1]) ** 2)
-    return weight * lateral_error + (1 - weight) * longitudinal_error
-
-
-# Try this as well
-def custom_loss(pred, target, mask, alpha=0.7, beta=0.3):
-    lateral_error = torch.mean(torch.abs(pred[mask][:, 0] - target[mask][:, 0]))
-    longitudinal_error = torch.mean(torch.abs(pred[mask][:, 1] - target[mask][:, 1]))
-    return alpha * lateral_error + beta * longitudinal_error
-
-
-
-# Debugging utilities
-def debug_predictions(pred, target, epoch, mode="train"):
-    """
-    Debug the predictions and calculate error metrics for insights.
-    """
-    lateral_error = torch.mean(torch.abs(pred[..., 0] - target[..., 0])).item()
-    longitudinal_error = torch.mean((pred[..., 1] - target[..., 1]) ** 2).item()
-    print(
-        f"[{mode.capitalize()} Epoch {epoch}] Lateral Error: {lateral_error:.4f}, "
-        f"Longitudinal Error: {longitudinal_error:.4f}"
+    # Load dataset
+    train_loader = load_data(
+        dataset_path="drive_data/train",
+        transform_pipeline=transform_pipeline,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
     )
-    return lateral_error, longitudinal_error
+    val_loader = load_data(
+        dataset_path="drive_data/val",
+        transform_pipeline=transform_pipeline,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+    )
 
+    # Load model
+    print(f"Loading model: {model_name}")
+    model = load_model(model_name).to(device)
 
-
-
-def train_model(model, train_loader, val_loader, num_epochs=50, lr=1e-3, grad_clip=5.0):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
-
-    # Use L1 Loss
-    criterion = nn.L1Loss()
+    # Define optimizer, scheduler, and loss
     optimizer = Adam(model.parameters(), lr=lr)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+    criterion = nn.L1Loss()
 
-    best_lateral_error = float('inf')  # Keep track of the best lateral error
+    best_lateral_error = float("inf")
     for epoch in range(num_epochs):
         model.train()
         train_loss = 0
@@ -256,11 +243,10 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=1e-3, grad_cl
 
             optimizer.zero_grad()
             predictions = model(track_left, track_right)
-            loss = criterion(predictions[mask], waypoints[mask])  # Apply mask
+            loss = criterion(predictions[mask], waypoints[mask])
             loss.backward()
-            
-            # Gradient clipping
-            clip_grad_norm_(model.parameters(), grad_clip)
+
+            clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
             train_loss += loss.item()
 
@@ -281,7 +267,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=1e-3, grad_cl
                 predictions = model(track_left, track_right)
                 loss = criterion(predictions[mask], waypoints[mask])
                 val_loss += loss.item()
-                
+
                 lateral_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
                 longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
 
@@ -289,24 +275,20 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=1e-3, grad_cl
         lateral_error /= len(val_loader)
         longitudinal_error /= len(val_loader)
 
-        print(f"Epoch {epoch + 1}/{num_epochs} - "
-              f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, "
-              f"Lateral Error: {lateral_error:.4f}, Longitudinal Error: {longitudinal_error:.4f}")
+        print(f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.4f}, "
+              f"Val Loss: {val_loss:.4f}, Lateral Error: {lateral_error:.4f}, Longitudinal Error: {longitudinal_error:.4f}")
 
-        # Save the model with the best lateral error
+        # Save best model
         if lateral_error < best_lateral_error:
             best_lateral_error = lateral_error
             torch.save(model.state_dict(), "best_model.pt")
-            print(f"New best model saved with lateral error: {best_lateral_error:.4f}")
+            print(f"Saved new best model with lateral error: {best_lateral_error:.4f}")
 
-        # Adjust learning rate
         scheduler.step(val_loss)
 
     print("Training complete. Best lateral error:", best_lateral_error)
 
 
-
-# Main entry point
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a planner model")
     parser.add_argument("--model", type=str, required=True, choices=["mlp_planner"], help="Model to train")
@@ -317,19 +299,6 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="Enable debug mode for detailed outputs")
     args = parser.parse_args()
 
-    train(args)
-
-        
-        
-
-
-    # train(
-    #     model_name=args.model,
-    #     transform_pipeline="state_only",
-    #     num_workers=args.num_workers,
-    #     lr=args.learning_rate,
-    #     batch_size=args.batch_size,
-    #     num_epochs=args.epochs,
-    #     debug=args.debug,
-    # )
-
+    train_model(
+        args
+    )
