@@ -31,31 +31,60 @@ class MLPPlanner(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, output_dim),
         )
+    #
+    # def forward(self, track_left: torch.Tensor, track_right: torch.Tensor, **kwargs) -> torch.Tensor:
+    #     """
+    #     Predicts waypoints from the left and right boundaries of the track.
+    #
+    #     Args:
+    #         track_left (torch.Tensor): shape (b, n_track, 2)
+    #         track_right (torch.Tensor): shape (b, n_track, 2)
+    #
+    #     Returns:
+    #         torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
+    #     """
+    #     # Concatenate left and right tracks
+    #     batch_size = track_left.shape[0]
+    #     x = torch.cat([track_left, track_right], dim=1)  # Shape: (b, 2 * n_track, 2)
+    #
+    #     # Flatten the input
+    #     x = x.view(batch_size, -1)  # Shape: (b, 2 * n_track * 2)
+    #
+    #     # Pass through MLP
+    #     x = self.mlp(x)  # Shape: (b, n_waypoints * 2)
+    #
+    #     # Reshape to (b, n_waypoints, 2)
+    #     x = x.view(batch_size, self.n_waypoints, 2)
+    #
+    #     return x
 
     def forward(self, track_left: torch.Tensor, track_right: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Predicts waypoints from the left and right boundaries of the track.
 
         Args:
-            track_left (torch.Tensor): shape (b, n_track, 2)
-            track_right (torch.Tensor): shape (b, n_track, 2)
+            track_left (torch.Tensor): shape (batch_size, n_track, 2)
+            track_right (torch.Tensor): shape (batch_size, n_track, 2)
 
         Returns:
-            torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
+            torch.Tensor: future waypoints with shape (batch_size, n_waypoints, 2)
         """
-        # Concatenate left and right tracks
-        batch_size = track_left.shape[0]
-        x = torch.cat([track_left, track_right], dim=1)  # Shape: (b, 2 * n_track, 2)
+        # Calculate centerline and lane width
+        centerline = (track_left + track_right) / 2  # Average of left and right tracks
+        lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)  # Norm along the last dimension
 
-        # Flatten the input
-        x = x.view(batch_size, -1)  # Shape: (b, 2 * n_track * 2)
+        # Expand lane_width to match (batch_size, n_track, 2)
+        lane_width = lane_width.repeat(1, 1, 2)  # Duplicate along the last dimension
+
+        # Concatenate features: track boundaries, centerline, lane width
+        batch_size = track_left.shape[0]
+        x = torch.cat([track_left, track_right, centerline, lane_width],
+                      dim=1)  # Concatenate along the second dimension
+        x = x.view(batch_size, -1)  # Flatten input
 
         # Pass through MLP
-        x = self.mlp(x)  # Shape: (b, n_waypoints * 2)
-
-        # Reshape to (b, n_waypoints, 2)
-        x = x.view(batch_size, self.n_waypoints, 2)
-
+        x = self.mlp(x)  # Shape: (batch_size, n_waypoints * 2)
+        x = x.view(batch_size, self.n_waypoints, 2)  # Reshape to (batch_size, n_waypoints, 2)
         return x
 
 

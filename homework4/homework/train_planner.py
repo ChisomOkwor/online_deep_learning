@@ -13,12 +13,12 @@ def train(
     num_workers: int = 4,
     lr: float = 1e-4,
     batch_size: int = 128,
-    num_epoch: int = 100,
+    num_epoch: int = 40,
 ):
     print(f"Training {model_name} with lr={lr}, batch_size={batch_size}, num_epoch={num_epoch}")
 
     # Set device
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load dataset
     print("Loading dataset...")
@@ -40,8 +40,7 @@ def train(
 
     # Load model
     print(f"Loading model: {model_name}")
-    # model = load_model(model_name).to(device)
-    model = load_model(model_name)
+    model = load_model(model_name).to(device)
 
     # Define optimizer and loss function
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -59,26 +58,20 @@ def train(
             # Prepare inputs based on model type
             if model_name == "cnn_planner":
                 # CNNPlanner expects images as input
-                # inputs = batch["image"].to(device)
-                inputs = batch["image"]
-
+                inputs = batch["image"].to(device)
                 pred_waypoints = model(inputs)
             else:
                 # Other planners expect track boundaries as input
-                track_left = batch["track_left"]
-                track_right = batch["track_right"]
-
-                # track_left = batch["track_left"].to(device)
-                # track_right = batch["track_right"].to(device)
+                track_left = batch["track_left"].to(device)
+                track_right = batch["track_right"].to(device)
                 pred_waypoints = model(track_left=track_left, track_right=track_right)
 
             # Get ground truth waypoints
-            # waypoints = batch["waypoints"].to(device)
-            waypoints = batch["waypoints"]
-
+            waypoints = batch["waypoints"].to(device)
 
             # Compute loss
-            loss = criterion(pred_waypoints, waypoints)
+            # loss = criterion(pred_waypoints, waypoints)
+            loss = weighted_mse_loss(pred_waypoints, waypoints)
 
             # Backward pass and optimization
             loss.backward()
@@ -95,20 +88,17 @@ def train(
         with torch.no_grad():
             for batch in val_loader:
                 if model_name == "cnn_planner":
-                    # inputs = batch["image"].to(device)
-
-                    inputs = batch["image"]
+                    inputs = batch["image"].to(device)
                     pred_waypoints = model(inputs)
                 else:
-                    # track_left = batch["track_left"].to(device)
-                    # track_right = batch["track_right"].to(device)
-                    track_left = batch["track_left"]
-                    track_right = batch["track_right"]
+                    track_left = batch["track_left"].to(device)
+                    track_right = batch["track_right"].to(device)
                     pred_waypoints = model(track_left=track_left, track_right=track_right)
-                
-                # waypoints = batch["waypoints"].to(device)
-                waypoints = batch["waypoints"]
-                loss = criterion(pred_waypoints, waypoints)
+
+                waypoints = batch["waypoints"].to(device)
+                # loss = criterion(pred_waypoints, waypoints)
+                loss = weighted_mse_loss(pred_waypoints, waypoints)
+
                 val_loss += loss.item()
 
         val_loss /= len(val_loader)
@@ -117,6 +107,15 @@ def train(
     # Save model
     save_model(model)
     print(f"Model {model_name} saved successfully!")
+
+
+# Weighted loss function
+def weighted_mse_loss(pred, target):
+    longitudinal_error = torch.abs(pred[..., 1] - target[..., 1])
+    lateral_error = torch.abs(pred[..., 0] - target[..., 0])
+    return 0.5 * torch.mean(longitudinal_error**2) + 1.5 * torch.mean(lateral_error**2)
+
+# Replace criterion
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a planner model")
