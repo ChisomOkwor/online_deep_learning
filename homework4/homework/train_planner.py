@@ -193,7 +193,11 @@
 # #     args = parser.parse_args()
 
 # #     train(args)
-
+import torch
+from torch import nn
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.nn.utils import clip_grad_norm_
 
 # Define the loss function
 def combined_loss(pred, target, weight=0.6):
@@ -227,11 +231,7 @@ def debug_predictions(pred, target, epoch, mode="train"):
     return lateral_error, longitudinal_error
 
 
-import torch
-from torch import nn
-from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.nn.utils import clip_grad_norm_
+
 
 def train_model(model, train_loader, val_loader, num_epochs=50, lr=1e-3, grad_clip=5.0):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
