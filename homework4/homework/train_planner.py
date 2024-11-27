@@ -68,7 +68,7 @@ def train_model(
             )
 
             predictions = model(track_left, track_right)
-            loss = weighted_loss(predictions[mask], waypoints[mask], mask)
+            loss = criterion(predictions[mask], waypoints[mask])
             loss.backward()
 
             clip_grad_norm_(model.parameters(), max_norm=5.0)
