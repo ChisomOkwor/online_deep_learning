@@ -57,6 +57,7 @@ def train(
     batch_size: int = 128,
     num_epoch: int = 40,
 ):
+    print("new code is picked up")
     print(f"Training {model_name} with lr={lr}, batch_size={batch_size}, num_epoch={num_epoch}")
 
     # Set device
