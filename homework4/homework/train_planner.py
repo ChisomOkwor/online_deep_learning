@@ -19,6 +19,14 @@ def balanced_loss(pred, target):
     longitudinal_error = torch.mean((pred[..., 1] - target[..., 1]) ** 2)
     return 0.6 * lateral_error + 0.4 * longitudinal_error
 
+def dynamic_balanced_loss(pred, target, epoch):
+    # Adjust weights dynamically based on the epoch
+    lateral_weight = 0.7 if epoch < 50 else 0.5
+    longitudinal_weight = 1.0 - lateral_weight
+    lateral_error = torch.mean(torch.abs(pred[..., 0] - target[..., 0]))
+    longitudinal_error = torch.mean((pred[..., 1] - target[..., 1]) ** 2)
+    return lateral_weight * lateral_error + longitudinal_weight * longitudinal_error
+
 
 def log_lateral_and_longitudinal_error(pred, target):
     lateral_error = torch.mean(torch.abs(pred[..., 0] - target[..., 0])).item()
@@ -63,6 +71,8 @@ def train(
 
     # Define optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+
 
     # Training loop
     print("Starting training...")
@@ -82,10 +92,13 @@ def train(
             pred_waypoints = model(track_left=track_left, track_right=track_right)
 
             # Compute loss
-            loss = balanced_loss(pred_waypoints, waypoints)
+            loss = dynamic_balanced_loss(pred_waypoints, waypoints, epoch)
+
 
             # Backpropagation and optimization
             loss.backward()
+
+            
             optimizer.step()
 
             train_loss += loss.item()
@@ -118,6 +131,7 @@ def train(
         val_loss /= len(val_loader)
         val_lateral_error /= len(val_loader)
         val_longitudinal_error /= len(val_loader)
+        scheduler.step()
 
         print(
             f"Epoch {epoch + 1}/{num_epoch} - Validation Loss: {val_loss:.4f}, "
