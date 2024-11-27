@@ -89,7 +89,7 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class MLPPlanner(nn.Module):
-    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 256):
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 128):
         """
         Args:
             n_track (int): Number of points in each side of the track.
@@ -101,21 +101,16 @@ class MLPPlanner(nn.Module):
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
-        # Input dimension calculation: track_left, track_right, centerline, lane_width
-        input_dim = 4 * n_track * 2  # 4 features, each with 2D points
+        # Input dimension: track_left + track_right + centerline + lane_width
+        input_dim = 4 * n_track * 2  # 4 features (track boundaries, centerline, lane width), each 2D
         output_dim = n_waypoints * 2  # Predict n_waypoints with (x, y) coordinates
 
-        # Enhanced MLP architecture with added capacity and dropout
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.3),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim),  # Output layer
+            nn.Linear(hidden_dim, output_dim),
         )
 
     def forward(self, track_left: torch.Tensor, track_right: torch.Tensor, **kwargs) -> torch.Tensor:
@@ -130,19 +125,19 @@ class MLPPlanner(nn.Module):
             torch.Tensor: Predicted waypoints with shape (batch_size, n_waypoints, 2)
         """
         # Calculate centerline and lane width
-        centerline = (track_left + track_right) / 2  # Average of left and right tracks
-        lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)  # Euclidean distance
+        centerline = (track_left + track_right) / 2
+        lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)
 
-        # Normalize inputs for stability
-        track_left = (track_left - track_left.mean(dim=1, keepdim=True)) / track_left.std(dim=1, keepdim=True)
-        track_right = (track_right - track_right.mean(dim=1, keepdim=True)) / track_right.std(dim=1, keepdim=True)
-        centerline = (centerline - centerline.mean(dim=1, keepdim=True)) / centerline.std(dim=1, keepdim=True)
-        lane_width = (lane_width - lane_width.mean(dim=1, keepdim=True)) / lane_width.std(dim=1, keepdim=True)
+        # Normalize inputs for stable training
+        track_left = (track_left - track_left.mean(dim=1, keepdim=True)) / (track_left.std(dim=1, keepdim=True) + 1e-6)
+        track_right = (track_right - track_right.mean(dim=1, keepdim=True)) / (track_right.std(dim=1, keepdim=True) + 1e-6)
+        centerline = (centerline - centerline.mean(dim=1, keepdim=True)) / (centerline.std(dim=1, keepdim=True) + 1e-6)
+        lane_width = (lane_width - lane_width.mean(dim=1, keepdim=True)) / (lane_width.std(dim=1, keepdim=True) + 1e-6)
 
-        # Expand lane_width to match the dimensionality of other features
+        # Expand lane_width to match the other feature dimensions
         lane_width = lane_width.repeat(1, 1, 2)
 
-        # Concatenate all features along the second dimension
+        # Concatenate features along the second dimension
         batch_size = track_left.shape[0]
         x = torch.cat([track_left, track_right, centerline, lane_width], dim=1)  # Shape: (batch_size, 4 * n_track, 2)
 
@@ -154,8 +149,8 @@ class MLPPlanner(nn.Module):
 
         # Reshape to (batch_size, n_waypoints, 2)
         x = x.view(batch_size, self.n_waypoints, 2)
-        return x
 
+        return x
 
 
 class TransformerPlanner(nn.Module):
