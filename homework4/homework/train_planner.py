@@ -1,6 +1,9 @@
 import argparse
 import torch
 from torch import nn
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.nn.utils import clip_grad_norm_
 from homework.models import load_model, save_model
 from homework.datasets.road_dataset import load_data
 from tqdm import tqdm
@@ -226,8 +229,8 @@ def train_model(
     model = load_model(model_name).to(device)
 
     # Define optimizer, scheduler, and loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+    optimizer = Adam(model.parameters(), lr=lr)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
     criterion = nn.L1Loss()
 
     best_lateral_error = float("inf")
