@@ -8,9 +8,42 @@ INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
+# class MLPPlanner(nn.Module):
+#     def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 64, hidden_dim2: int = 32):
+#         super().__init__()
+
+#         self.n_track = n_track
+#         self.n_waypoints = n_waypoints
+
+#         input_dim = 4 * n_track * 2  # track boundaries, centerline, lane width
+#         output_dim = n_waypoints * 2  # (x, y) coordinates for waypoints
+
+#         self.mlp = nn.Sequential(
+#             nn.Linear(input_dim, hidden_dim1),
+#             nn.LeakyReLU(),
+#             nn.Dropout(0.1),  # Add dropout for regularization
+#             nn.Linear(hidden_dim1, hidden_dim2),
+#             nn.LeakyReLU(),
+#             nn.Dropout(0.1),
+#             nn.Linear(hidden_dim2, output_dim),
+#         )
+
+#     def forward(self, track_left: torch.Tensor, track_right: torch.Tensor, **kwargs) -> torch.Tensor:
+#         centerline = (track_left + track_right) / 2
+#         lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)
+
+#         track_left = (track_left - track_left.mean(dim=1, keepdim=True)) / (track_left.std(dim=1, keepdim=True) + 1e-6)
+#         track_right = (track_right - track_right.mean(dim=1, keepdim=True)) / (track_right.std(dim=1, keepdim=True) + 1e-6)
+#         centerline = (centerline - centerline.mean(dim=1, keepdim=True)) / (centerline.std(dim=1, keepdim=True) + 1e-6)
+#         lane_width = (lane_width - lane_width.mean(dim=1, keepdim=True)) / (lane_width.std(dim=1, keepdim=True) + 1e-6)
+
+#         lane_width = lane_width.repeat(1, 1, 2)
+#         x = torch.cat([track_left, track_right, centerline, lane_width], dim=1).view(track_left.shape[0], -1)
+#         return self.mlp(x).view(track_left.shape[0], self.n_waypoints, 2)
+
 
 class MLPPlanner(nn.Module):
-    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 64, hidden_dim2: int = 32):
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 32):
         super().__init__()
 
         self.n_track = n_track
@@ -20,19 +53,18 @@ class MLPPlanner(nn.Module):
         output_dim = n_waypoints * 2  # (x, y) coordinates for waypoints
 
         self.mlp = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim1),
+            nn.Linear(input_dim, hidden_dim),
             nn.LeakyReLU(),
-            nn.Dropout(0.1),  # Add dropout for regularization
-            nn.Linear(hidden_dim1, hidden_dim2),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.LeakyReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim2, output_dim),
+            nn.Linear(hidden_dim, output_dim),
         )
 
-    def forward(self, track_left: torch.Tensor, track_right: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
         centerline = (track_left + track_right) / 2
         lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)
 
+        # Normalize inputs
         track_left = (track_left - track_left.mean(dim=1, keepdim=True)) / (track_left.std(dim=1, keepdim=True) + 1e-6)
         track_right = (track_right - track_right.mean(dim=1, keepdim=True)) / (track_right.std(dim=1, keepdim=True) + 1e-6)
         centerline = (centerline - centerline.mean(dim=1, keepdim=True)) / (centerline.std(dim=1, keepdim=True) + 1e-6)
@@ -41,7 +73,6 @@ class MLPPlanner(nn.Module):
         lane_width = lane_width.repeat(1, 1, 2)
         x = torch.cat([track_left, track_right, centerline, lane_width], dim=1).view(track_left.shape[0], -1)
         return self.mlp(x).view(track_left.shape[0], self.n_waypoints, 2)
-
 
 
 class TransformerPlanner(nn.Module):
