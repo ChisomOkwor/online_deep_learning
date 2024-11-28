@@ -1,14 +1,14 @@
-# import argparse
-# import torch
-# from torch import nn
-# from torch.optim import Adam
-# from torch.optim.lr_scheduler import ReduceLROnPlateau
-# from torch.nn.utils import clip_grad_norm_
-# from homework.models import load_model, save_model
-# from homework.datasets.road_dataset import load_data
-# from torch.utils.tensorboard import SummaryWriter
+import argparse
+import torch
+from torch import nn
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.nn.utils import clip_grad_norm_
+from homework.models import load_model, save_model
+from homework.datasets.road_dataset import load_data
+from torch.utils.tensorboard import SummaryWriter
 
-# from tqdm import tqdm
+from tqdm import tqdm
 
 # def weighted_loss(pred, target, mask, alpha=0.7):
 #     lateral_error = torch.mean(torch.abs(pred[mask][:, 1] - target[mask][:, 1]))
@@ -139,16 +139,6 @@
 #     )
 
 
-import argparse
-import torch
-from torch import nn
-from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.nn.utils import clip_grad_norm_
-from homework.models import load_model, save_model
-from homework.datasets.road_dataset import load_data
-from torch.utils.tensorboard import SummaryWriter
-
 def train_model(
     model_name: str,
     transform_pipeline: str,
@@ -157,6 +147,7 @@ def train_model(
     batch_size: int,
     num_epochs: int,
     debug: bool = False,
+    grad_clip=5.0,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     writer = SummaryWriter(log_dir="runs/mlp_planner")
@@ -181,19 +172,16 @@ def train_model(
     print(f"Loading model: {model_name}")
     model = load_model(model_name).to(device)
 
-    # Optimizer, scheduler, and loss
-    optimizer = Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
+    # Use L1 Loss
     criterion = nn.L1Loss()
+    optimizer = Adam(model.parameters(), lr=lr)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
-    best_lateral_error = float("inf")
+    best_lateral_error = float('inf')  # Keep track of the best lateral error
     for epoch in range(num_epochs):
         model.train()
         train_loss = 0
         for batch in train_loader:
-            optimizer.zero_grad()
-
-            # Unpack the batch
             track_left, track_right, waypoints, mask = (
                 batch["track_left"].to(device),
                 batch["track_right"].to(device),
@@ -201,13 +189,13 @@ def train_model(
                 batch["waypoints_mask"].to(device),
             )
 
-            # Forward pass
+            optimizer.zero_grad()
             predictions = model(track_left, track_right)
-            loss = criterion(predictions[mask], waypoints[mask])
+            loss = criterion(predictions[mask], waypoints[mask])  # Apply mask
             loss.backward()
-
-            # Gradient clipping and optimizer step
-            clip_grad_norm_(model.parameters(), max_norm=5.0)
+            
+            # Gradient clipping
+            clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
             train_loss += loss.item()
 
@@ -225,56 +213,39 @@ def train_model(
                     batch["waypoints_mask"].to(device),
                 )
 
-                # Validation pass
                 predictions = model(track_left, track_right)
                 loss = criterion(predictions[mask], waypoints[mask])
                 val_loss += loss.item()
-
-                # Error metrics
-                lateral_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
-                longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
+                
+                lateral_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
+                longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
 
         val_loss /= len(val_loader)
         lateral_error /= len(val_loader)
         longitudinal_error /= len(val_loader)
 
-        # Log metrics to TensorBoard
+
+         # Log metrics to TensorBoard
         writer.add_scalar("Loss/Train", train_loss, epoch)
         writer.add_scalar("Loss/Validation", val_loss, epoch)
         writer.add_scalar("Error/Lateral", lateral_error, epoch)
         writer.add_scalar("Error/Longitudinal", longitudinal_error, epoch)
+        print(f"Epoch {epoch + 1}/{num_epochs} - "
+              f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, "
+              f"Lateral Error: {lateral_error:.4f}, Longitudinal Error: {longitudinal_error:.4f}")
 
-        # Print epoch progress
-        print(f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.4f}, "
-              f"Val Loss: {val_loss:.4f}, Lateral Error: {lateral_error:.4f}, Longitudinal Error: {longitudinal_error:.4f}")
-
-        # Save the best model
+        # Save the model with the best lateral error
         if lateral_error < best_lateral_error:
             best_lateral_error = lateral_error
             torch.save(model.state_dict(), "best_model.pt")
-            print(f"Saved new best model with lateral error: {best_lateral_error:.4f}")
+            print(f"New best model saved with lateral error: {best_lateral_error:.4f}")
 
-        # Step the scheduler
+        # Adjust learning rate
         scheduler.step(val_loss)
 
+    
     # Close the writer and save the model
     writer.close()
     print("Training complete. Best lateral error:", best_lateral_error)
     save_model(model)
     print(f"Model {model_name} saved successfully!")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train a planner model")
-    parser.add_argument("--model", type=str, required=True, choices=["mlp_planner"], help="Model to train")
-    parser.add_argument("--batch_size", type=int, default=128, help="Batch size for training")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for")
-    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--num_workers", type=int, default=4, help="Number of data loader workers")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode for detailed outputs")
-    args = parser.parse_args()
-
-    train_model(
-        args
-    )
-
