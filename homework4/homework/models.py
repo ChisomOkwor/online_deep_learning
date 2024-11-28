@@ -43,22 +43,21 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class MLPPlanner(nn.Module):
-    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 64, hidden_dim2: int = 32):
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 32):
         super().__init__()
 
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
         input_dim = 4 * n_track * 2  # track boundaries, centerline, lane width
-        output_dim = n_waypoints * 2 # (x, y) coordinates for waypoints
+        output_dim = n_waypoints * 2  # (x, y) coordinates for waypoints
 
         self.mlp = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim1),
-            nn.Dropout(0.3),
-            nn.Linear(hidden_dim1, hidden_dim2),
+            nn.Linear(input_dim, hidden_dim),
             nn.LeakyReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(hidden_dim2, output_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_dim, output_dim),
         )
 
     def forward(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
