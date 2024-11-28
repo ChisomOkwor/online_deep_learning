@@ -198,7 +198,7 @@ def train_model(
 
             optimizer.zero_grad()
             predictions = model(track_left, track_right)
-            loss = weighted_loss(predictions[mask], waypoints[mask])  # Apply mask
+            loss = weighted_loss(predictions[mask], waypoints[mask], mask)  # Apply mask
             loss.backward()
             
             # Gradient clipping
