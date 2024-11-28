@@ -138,21 +138,32 @@ from tqdm import tqdm
 #         args
 #     )
 
+      # train_model(
+      #         model_name=args.model,
+      #         transform_pipeline="state_only",
+      #         num_workers=args.num_workers,
+      #         lr=args.learning_rate,
+      #         batch_size=args.batch_size,
+      #         num_epochs=args.epochs,
+      #         debug=args.debug,
+      #     )
+
 
 def weighted_loss(pred, target, mask, alpha=0.7):
-    # Ensure the mask applies to the batch and waypoints dimensions
-    mask = mask.unsqueeze(-1).expand_as(pred)  # Expand mask to match pred and target
+    # Ensure mask has the correct shape
+    mask = mask.unsqueeze(-1).expand(-1, -1, 2)  # Expand mask to match pred and target shape
 
-    # Apply the mask
-    pred_masked = pred[mask].view(-1, 2)  # Reshape to (-1, 2) after masking
+    # Apply mask to predictions and targets
+    pred_masked = pred[mask].view(-1, 2)
     target_masked = target[mask].view(-1, 2)
 
-    # Calculate errors
+    # Compute lateral and longitudinal errors
     lateral_error = torch.mean(torch.abs(pred_masked[:, 1] - target_masked[:, 1]))
     longitudinal_error = torch.mean(torch.abs(pred_masked[:, 0] - target_masked[:, 0]))
 
-    # Weighted combination of errors
+    # Return weighted loss
     return alpha * lateral_error + (1 - alpha) * longitudinal_error
+
 
 
 
@@ -269,3 +280,29 @@ def train_model(
     print("Training complete. Best lateral error:", best_lateral_error)
     # save_model(model)
     # print(f"Model {model_name} saved successfully!")
+
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train a planner model")
+    parser.add_argument("--model", type=str, required=True, choices=["mlp_planner"], help="Model to train")
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size for training")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for")
+    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--num_workers", type=int, default=4, help="Number of data loader workers")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode for detailed outputs")
+    args = parser.parse_args()
+
+    train_model(
+        args
+    )
+
+    # train_model(
+    #     model_name=args.model,
+    #     transform_pipeline="state_only",
+    #     num_workers=args.num_workers,
+    #     lr=args.learning_rate,
+    #     batch_size=args.batch_size,
+    #     num_epochs=args.epochs,
+    #     debug=args.debug,
+    #   )
