@@ -175,7 +175,7 @@ def train_model(
     # Use L1 Loss
     criterion = nn.L1Loss()
     optimizer = Adam(model.parameters(), lr=lr)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     best_lateral_error = float('inf')  # Keep track of the best lateral error
     for epoch in range(num_epochs):
