@@ -139,6 +139,13 @@ from tqdm import tqdm
 #     )
 
 
+def weighted_loss(pred, target, mask, alpha=0.7):
+    # Emphasize lateral (y-axis) error
+    lateral_error = torch.mean(torch.abs(pred[mask][:, 1] - target[mask][:, 1]))
+    longitudinal_error = torch.mean(torch.abs(pred[mask][:, 0] - target[mask][:, 0]))
+    return alpha * lateral_error + (1 - alpha) * longitudinal_error
+
+
 def train_model(
     model_name: str,
     transform_pipeline: str,
@@ -191,7 +198,7 @@ def train_model(
 
             optimizer.zero_grad()
             predictions = model(track_left, track_right)
-            loss = criterion(predictions[mask], waypoints[mask])  # Apply mask
+            loss = weighted_loss(predictions[mask], waypoints[mask])  # Apply mask
             loss.backward()
             
             # Gradient clipping
@@ -216,9 +223,11 @@ def train_model(
                 predictions = model(track_left, track_right)
                 loss = criterion(predictions[mask], waypoints[mask])
                 val_loss += loss.item()
+
+                #Long error has to be 
                 
-                lateral_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
-                longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
+                longitudinal_error += torch.mean(torch.abs(predictions[mask][:, 0] - waypoints[mask][:, 0])).item()
+                lateral_error += torch.mean(torch.abs(predictions[mask][:, 1] - waypoints[mask][:, 1])).item()
 
         val_loss /= len(val_loader)
         lateral_error /= len(val_loader)
@@ -235,7 +244,7 @@ def train_model(
               f"Lateral Error: {lateral_error:.4f}, Longitudinal Error: {longitudinal_error:.4f}")
 
         # Save the model with the best lateral error
-        if lateral_error < best_lateral_error:
+        if lateral_error < 0.5 and longitudinal_error < 0.2:
             best_lateral_error = lateral_error
             torch.save(model.state_dict(), "best_model.pt")
             print(f"New best model saved with lateral error: {best_lateral_error:.4f}")
