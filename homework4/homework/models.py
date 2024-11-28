@@ -50,10 +50,10 @@ class MLPPlanner(nn.Module):
         self.n_waypoints = n_waypoints
 
         input_dim = 4 * n_track * 2  # track boundaries, centerline, lane width
-        output_dim = n_waypoints * 2  # (x, y) coordinates for waypoints
+        output_dim = n_waypoints * 2 # (x, y) coordinates for waypoints
 
         self.mlp = nn.Sequential(
-            nn.Linear(hidden_dim1, hidden_dim1),
+            nn.Linear(input_dim, hidden_dim1),
             nn.Dropout(0.3),
             nn.Linear(hidden_dim1, hidden_dim2),
             nn.LeakyReLU(),
