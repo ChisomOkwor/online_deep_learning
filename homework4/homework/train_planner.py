@@ -239,6 +239,7 @@ def train_model(
             best_lateral_error = lateral_error
             torch.save(model.state_dict(), "best_model.pt")
             print(f"New best model saved with lateral error: {best_lateral_error:.4f}")
+            save_model(model)
 
         # Adjust learning rate
         scheduler.step(val_loss)
@@ -247,5 +248,5 @@ def train_model(
     # Close the writer and save the model
     writer.close()
     print("Training complete. Best lateral error:", best_lateral_error)
-    save_model(model)
-    print(f"Model {model_name} saved successfully!")
+    # save_model(model)
+    # print(f"Model {model_name} saved successfully!")
