@@ -140,10 +140,20 @@ from tqdm import tqdm
 
 
 def weighted_loss(pred, target, mask, alpha=0.7):
-    # Emphasize lateral (y-axis) error
-    lateral_error = torch.mean(torch.abs(pred[mask][:, 1] - target[mask][:, 1]))
-    longitudinal_error = torch.mean(torch.abs(pred[mask][:, 0] - target[mask][:, 0]))
+    # Ensure the mask applies to the batch and waypoints dimensions
+    mask = mask.unsqueeze(-1).expand_as(pred)  # Expand mask to match pred and target
+
+    # Apply the mask
+    pred_masked = pred[mask].view(-1, 2)  # Reshape to (-1, 2) after masking
+    target_masked = target[mask].view(-1, 2)
+
+    # Calculate errors
+    lateral_error = torch.mean(torch.abs(pred_masked[:, 1] - target_masked[:, 1]))
+    longitudinal_error = torch.mean(torch.abs(pred_masked[:, 0] - target_masked[:, 0]))
+
+    # Weighted combination of errors
     return alpha * lateral_error + (1 - alpha) * longitudinal_error
+
 
 
 def train_model(
