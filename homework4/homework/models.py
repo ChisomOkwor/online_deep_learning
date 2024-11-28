@@ -8,6 +8,71 @@ INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, input_dim)
+        )
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        # Skip connection: Add input to output of the block
+        return self.activation(x + self.block(x))
+
+
+class MLPPlanner(nn.Module):
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 64):
+        super().__init__()
+        self.n_track = n_track
+        self.n_waypoints = n_waypoints
+
+        input_dim = 5 * n_track * 2  # Adjust based on features
+        output_dim = n_waypoints * 2
+
+        self.input_layer = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU()
+        )
+
+        # Two residual blocks
+        self.residual_block1 = ResidualBlock(hidden_dim, hidden_dim // 2)
+        self.residual_block2 = ResidualBlock(hidden_dim, hidden_dim // 2)
+
+        self.output_layer = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
+        # Preprocess features
+        centerline = (track_left + track_right) / 2
+        lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)
+        angles = torch.atan2(
+            track_right[..., 1] - track_left[..., 1],  # Difference in y-coordinates
+            track_right[..., 0] - track_left[..., 0]   # Difference in x-coordinates
+        )
+
+        # Normalize and concatenate features
+        track_left = (track_left - track_left.mean(dim=1, keepdim=True)) / (track_left.std(dim=1, keepdim=True) + 1e-6)
+        track_right = (track_right - track_right.mean(dim=1, keepdim=True)) / (track_right.std(dim=1, keepdim=True) + 1e-6)
+        centerline = (centerline - centerline.mean(dim=1, keepdim=True)) / (centerline.std(dim=1, keepdim=True) + 1e-6)
+        lane_width = (lane_width - lane_width.mean(dim=1, keepdim=True)) / (lane_width.std(dim=1, keepdim=True) + 1e-6)
+        lane_width = lane_width.repeat(1, 1, 2)
+        angles = angles.unsqueeze(-1).repeat(1, 1, 2)
+
+        x = torch.cat([track_left, track_right, centerline, lane_width, angles], dim=1).view(track_left.shape[0], -1)
+
+        # Pass through model
+        x = self.input_layer(x)
+        x = self.residual_block1(x)
+        x = self.residual_block2(x)
+        x = self.output_layer(x)
+
+        return x.view(track_left.shape[0], self.n_waypoints, 2)
+
+
 # class MLPPlanner(nn.Module):
 #     def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim1: int = 64, hidden_dim2: int = 32):
 #         super().__init__()
@@ -41,38 +106,79 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 #         x = torch.cat([track_left, track_right, centerline, lane_width], dim=1).view(track_left.shape[0], -1)
 #         return self.mlp(x).view(track_left.shape[0], self.n_waypoints, 2)
 
+# def augment_angles(angles, std=0.05):
+#     noise = torch.randn_like(angles) * std
+#     return angles + noise
 
-class MLPPlanner(nn.Module):
-    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 32):
-        super().__init__()
+# class MLPPlanner(nn.Module):
+#     def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 128):
+#         super().__init__()
 
-        self.n_track = n_track
-        self.n_waypoints = n_waypoints
+#         self.n_track = n_track
+#         self.n_waypoints = n_waypoints
 
-        input_dim = 4 * n_track * 2  # track boundaries, centerline, lane width
-        output_dim = n_waypoints * 2  # (x, y) coordinates for waypoints
+#         # Correct input dimension calculation
+#         input_dim = 5 * n_track * 2
+#         output_dim = n_waypoints * 2
 
-        self.mlp = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.LeakyReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(),
-            nn.Linear(hidden_dim, output_dim),
-        )
+#         self.mlp = nn.Sequential(
+#           nn.Linear(input_dim, hidden_dim),
+#           nn.BatchNorm1d(hidden_dim),
+#           nn.ReLU(),
+#           nn.Dropout(0.1),
+#           nn.Linear(hidden_dim, hidden_dim // 2),
+#           nn.BatchNorm1d(hidden_dim // 2),
+#           nn.ReLU(),
+#           nn.Dropout(0.1),
+#           nn.Linear(hidden_dim // 2, output_dim),
+#         )
 
-    def forward(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
-        centerline = (track_left + track_right) / 2
-        lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)
 
-        # Normalize inputs
-        track_left = (track_left - track_left.mean(dim=1, keepdim=True)) / (track_left.std(dim=1, keepdim=True) + 1e-6)
-        track_right = (track_right - track_right.mean(dim=1, keepdim=True)) / (track_right.std(dim=1, keepdim=True) + 1e-6)
-        centerline = (centerline - centerline.mean(dim=1, keepdim=True)) / (centerline.std(dim=1, keepdim=True) + 1e-6)
-        lane_width = (lane_width - lane_width.mean(dim=1, keepdim=True)) / (lane_width.std(dim=1, keepdim=True) + 1e-6)
+#     def forward(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
+#         centerline = (track_left + track_right) / 2
+#         lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)
+#         angles = torch.atan2(track_right[..., 1] - track_left[..., 1], track_right[..., 0] - track_left[..., 0])
 
-        lane_width = lane_width.repeat(1, 1, 2)
-        x = torch.cat([track_left, track_right, centerline, lane_width], dim=1).view(track_left.shape[0], -1)
-        return self.mlp(x).view(track_left.shape[0], self.n_waypoints, 2)
+#         # Normalize inputs
+#         track_left = (track_left - track_left.mean(dim=1, keepdim=True)) / (track_left.std(dim=1, keepdim=True) + 1e-6)
+#         track_right = (track_right - track_right.mean(dim=1, keepdim=True)) / (track_right.std(dim=1, keepdim=True) + 1e-6)
+#         centerline = (centerline - centerline.mean(dim=1, keepdim=True)) / (centerline.std(dim=1, keepdim=True) + 1e-6)
+#         lane_width = (lane_width - lane_width.mean(dim=1, keepdim=True)) / (lane_width.std(dim=1, keepdim=True) + 1e-6)
+
+#         # Concatenate features
+#         lane_width = lane_width.repeat(1, 1, 2)
+#         angles = angles.unsqueeze(-1).repeat(1, 1, 2)
+#         x = torch.cat([track_left, track_right, centerline, lane_width, angles], dim=1).view(track_left.shape[0], -1)
+
+#         # Debugging shape mismatch
+#         assert x.shape[1] == 5 * self.n_track * 2, f"Expected {5 * self.n_track * 2}, got {x.shape[1]}"
+
+#         return self.mlp(x).view(track_left.shape[0], self.n_waypoints, 2)
+
+    # def forward(self, track_left: torch.Tensor, track_right: torch.Tensor) -> torch.Tensor:
+    #   centerline = (track_left + track_right) / 2
+    #   lane_width = torch.norm(track_left - track_right, dim=2, keepdim=True)
+    #   angles = torch.atan2(
+    #       track_right[..., 1] - track_left[..., 1],  # Difference in y-coordinates
+    #       track_right[..., 0] - track_left[..., 0]   # Difference in x-coordinates
+    #   )
+
+    #   angles = augment_angles(angles)
+
+    #   # Normalize inputs
+    #   track_left = (track_left - track_left.mean(dim=1, keepdim=True)) / (track_left.std(dim=1, keepdim=True) + 1e-6)
+    #   track_right = (track_right - track_right.mean(dim=1, keepdim=True)) / (track_right.std(dim=1, keepdim=True) + 1e-6)
+    #   centerline = (centerline - centerline.mean(dim=1, keepdim=True)) / (centerline.std(dim=1, keepdim=True) + 1e-6)
+    #   lane_width = (lane_width - lane_width.mean(dim=1, keepdim=True)) / (lane_width.std(dim=1, keepdim=True) + 1e-6)
+
+    #   # Expand and repeat lane width and angles to match dimensions
+    #   lane_width = lane_width.repeat(1, 1, 2)
+    #   angles = angles.unsqueeze(-1).repeat(1, 1, 2)
+
+    #   # Concatenate all features
+    #   x = torch.cat([track_left, track_right, centerline, lane_width, angles], dim=1).view(track_left.shape[0], -1)
+    #   return self.mlp(x).view(track_left.shape[0], self.n_waypoints, 2)
+
 
 
 class TransformerPlanner(nn.Module):
